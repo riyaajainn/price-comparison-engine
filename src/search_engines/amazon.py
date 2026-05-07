@@ -50,42 +50,52 @@ def search_amazon(page, query: str, raw_title: str = "") -> list:
     results = []
     seen_asins = set()
 
-    # Set High-Reputation Stealth Headers (mimicking a visit from Google)
-    page.context.clear_cookies() # Start with a clean slate
+    # Apply stealth before navigation
+    try:
+        stealth_sync(page)
+    except:
+        pass
+
+    # Set High-Reputation Stealth Headers
+    # Note: We removed clear_cookies() to allow session persistence which looks more human
     page.set_extra_http_headers({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         "Accept-Language": "en-US,en;q=0.9",
         "Referer": "https://www.google.com/"
     })
 
-    # Strategy 0: Human-Mimicry (Navigate to home + Type) - HIGHEST STEALTH
+    # Strategy 0: Human-Mimicry (Navigate to home + Copy-Paste)
     try:
-        print("[*] Amazon Strategy 0: Human-Mimicry (Search Bar Typing)")
+        print("[*] Amazon Strategy 0: Human-Mimicry (Search Bar Copy-Paste)")
         page.goto("https://www.amazon.in", wait_until="commit", timeout=30000)
-        time.sleep(1)
+        time.sleep(2)
         
+        # Check for Robot Check on Home Page
+        if any(kw in page.content().lower() for kw in ["robot check", "captcha", "human verification"]):
+            print("  [⚠️] Amazon Home Page blocked by Robot Check. Reloading...")
+            page.reload(wait_until="domcontentloaded")
+            time.sleep(3)
+
         # Check for search bar
         search_box = page.locator('#twotabsearchtextbox')
-        search_box.wait_for(timeout=10000)
         if search_box.count() > 0:
             search_box.click()
+            time.sleep(1)
+            search_box.fill(base_query)
             time.sleep(0.5)
-            search_box.fill("")
-            # Type with human-like delay
-            search_box.press_sequentially(base_query, delay=100)
             page.keyboard.press("Enter")
             
-            # Wait for results or robot check
-            try:
-                page.wait_for_selector('[data-component-type="s-search-result"], .s-result-item', timeout=15000)
-            except:
-                pass
+            # Wait for results and do a "Human Scroll"
+            time.sleep(3)
+            page.mouse.wheel(0, 500) 
+            time.sleep(1)
+            
+            # Extract results if any
+            # (Extraction logic is shared below in the loop, but we can do a quick check here)
     except Exception as e:
         print(f"[-] Amazon Strategy 0 failed: {e}")
 
     for i, search_term in enumerate(strategies):
         if not search_term or len(search_term.strip()) < 5: continue
-        # Check if Strategy 0 already found results
         if results: break 
         
         encoded_q = urllib.parse.quote_plus(search_term.strip())
@@ -94,19 +104,17 @@ def search_amazon(page, query: str, raw_title: str = "") -> list:
         print(f"[*] Amazon Strategy {i+1}: {search_url}")
         
         try:
+            # Human-like delay between strategies
+            if i > 0: time.sleep(2)
+            
             page.goto(search_url, wait_until="domcontentloaded", timeout=60000)
             
-            # Layer 1: Robot Check Detection & Recovery
-            for _ in range(3):
-                try:
-                    content = page.content().lower()
-                except:
-                    time.sleep(2)
-                    continue
-
-                if any(kw in content for kw in ["robot check", "enter the characters", "verify you are human", "unusual traffic", "px-captcha"]):
-                    print(f"  [⚠️] Amazon Robot Check detected. Strategy {i+1} refreshing...")
-                    time.sleep(3)
+            # Robot Check Detection & Recovery Loop
+            for attempt in range(3):
+                content = page.content().lower()
+                if any(kw in content for kw in ["robot check", "captcha", "enter the characters", "verify you are human", "unusual traffic", "px-captcha"]):
+                    print(f"  [⚠️] Amazon Search blocked by Robot Check (Attempt {attempt+1}). Waiting and Reloading...")
+                    time.sleep(5)
                     page.reload(wait_until="domcontentloaded")
                 else:
                     break
@@ -121,23 +129,36 @@ def search_amazon(page, query: str, raw_title: str = "") -> list:
                     print(f"  [-] Strategy {i+1}: Zero results found.")
                 elif any(kw in title_now for kw in ["robot check", "captcha"]) or "robot check" in content_now:
                     print(f"  [!] Strategy {i+1} permanently blocked by Robot Check.")
-                continue # Try next strategy or exit loop if done
+                continue 
 
             # Scroll to load
             page.mouse.wheel(0, 2000)
-            time.sleep(1)
+            time.sleep(1.5)
 
-            # Extract from all possible containers
-            items = page.locator('[data-component-type="s-search-result"], .s-result-item[data-asin], .sg-col-inner').all()
+            # Extract only from strict product containers
+            items = page.locator('div[data-component-type="s-search-result"]').all()
             
             for item in items:
                 try:
-                    # Find title and link
-                    title_link = item.locator('h2 a, a.a-link-normal.s-underline-text').first
-                    if not title_link.count(): continue
+                    # Find title and link (resilient to different Amazon layouts)
+                    # Often h2 a, but sometimes div a.a-text-normal
+                    title_link = item.locator('h2 a, a.a-link-normal.a-text-normal').first
+                    if not title_link.count():
+                        # Fallback: any link with enough text
+                        all_links = item.locator('a.a-link-normal').all()
+                        for link in all_links:
+                            if len(link.inner_text().strip()) > 20:
+                                title_link = link
+                                break
+                    
+                    if not title_link or not title_link.count(): continue
                     
                     href = title_link.get_attribute("href") or ""
                     title = title_link.inner_text().strip()
+                    
+                    # Ensure brand is in title for matching (Amazon sometimes omits it)
+                    if brand and brand.lower() not in title.lower():
+                        title = f"{brand.title()} {title}"
                     
                     if not title or len(title) < 10: continue
                     

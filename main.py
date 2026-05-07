@@ -82,16 +82,18 @@ class ProductMatchingAgent:
                 "--disable-blink-features=AutomationControlled",
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
+                "--disable-web-security",
+                "--disable-features=IsolateOrigins,site-per-process",
+                "--allow-running-insecure-content"
             ],
         )
         self.context = self.browser.new_context(
             user_agent=(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/131.0.0.0 Safari/537.36"
-
+                "Chrome/133.0.0.0 Safari/537.36"
             ),
-            viewport={"width": 1280, "height": 720},
+            viewport={"width": 1920, "height": 1080},
             permissions=["geolocation"],
             geolocation={"latitude": 12.9716, "longitude": 77.5946},
         )

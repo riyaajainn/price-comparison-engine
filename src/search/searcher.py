@@ -43,22 +43,11 @@ def build_search_query(normalized_data: dict, simple: bool = False) -> str:
         if not already_in_model and (len(variant_clean) > 1 or variant_clean.isalpha()):
             parts.append(variant_clean.title())
 
-    # 4. RAM
-    ram = normalized_data.get("ram", "")
-    if ram and not simple:
-        # Standardize to 12GB (no space) for search engine friendliness
-        parts.append(ram.replace(" ", "").upper())
-
     # 5. Storage
     storage = normalized_data.get("storage", "")
     if storage:
         # Standardize to 256GB (no space)
         parts.append(storage.replace(" ", "").upper())
-
-    # 6. Color
-    color = normalized_data.get("color", "")
-    if color and not simple:
-        parts.append(color.title())
 
     query = " ".join(parts).strip()
 
